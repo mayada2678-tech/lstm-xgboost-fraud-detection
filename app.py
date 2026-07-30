@@ -35,12 +35,19 @@ st.markdown("""
 # ==============================================================================
 @st.cache_resource
 def load_models():
+    # Workaround für den Streamlit Keras-Versionskonflikt ('input_axes' Fehler)
+    class SafeGlorotUniform(tf.keras.initializers.GlorotUniform):
+        def __init__(self, seed=None, **kwargs):
+            # Wir fangen 'input_axes' und 'output_axes' ab und leiten nur den seed weiter
+            super(SafeGlorotUniform, self).__init__(seed=seed)
+
     # 1. Scaler (PowerTransformer)
     with open("scaler_pt.pkl", "rb") as f:
         scaler = pickle.load(f)
         
-    # 2. LSTM Autoencoder (Ganz normal laden, erfordert TF >= 2.16.1 in requirements.txt!)
-    autoencoder = tf.keras.models.load_model("fraud_lstm_autoencoder_pt.h5", compile=False)
+    # 2. LSTM Autoencoder MIT WORKAROUND laden
+    with tf.keras.utils.custom_object_scope({'GlorotUniform': SafeGlorotUniform}):
+        autoencoder = tf.keras.models.load_model("fraud_lstm_autoencoder_pt.h5", compile=False)
     
     # 3. Encoder Bottleneck extrahieren (die 32 Latent Features)
     encoder_model = Model(
@@ -87,10 +94,9 @@ if submit_btn:
     X_input = np.zeros((1, expected_features))
     
     # Feature Engineering (wie in deinem Trainingsskript)
-    X_input[0, 0] = np.log1p(amount) # Amount_log (angenommen dies ist Index 0)
-    X_input[0, 1] = delta_time       # delta_time (angenommen Index 1)
-    X_input[0, 2] = tx_count_1h      # tx_count_1h (angenommen Index 2)
-    # Die restlichen Indizes bleiben 0 (als Baseline für die V-Features)
+    X_input[0, 0] = np.log1p(amount) # Amount_log
+    X_input[0, 1] = delta_time       # delta_time
+    X_input[0, 2] = tx_count_1h      # tx_count_1h
     
     # 2. Skalierung (Yeo-Johnson)
     X_scaled = scaler.transform(X_input)
@@ -109,7 +115,7 @@ if submit_btn:
     # 6. XGBoost Prediction
     fraud_prob = xgb_model.predict_proba(X_hybrid)[0, 1] * 100
     
-    # Schwellenwert (Setze hier den optimalen Threshold aus deinem Training ein, z.B. 0.80 -> 80%)
+    # Schwellenwert
     XGB_THRESHOLD = 80.0 
     
     # 7. Ergebnisse anzeigen
