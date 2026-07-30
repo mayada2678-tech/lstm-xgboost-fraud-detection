@@ -9,6 +9,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import pickle
+import datetime
 import tensorflow as tf
 from tensorflow.keras.models import Model
 import keras
@@ -88,31 +89,23 @@ def load_models():
     xgb_model = None
     
     try:
-        # Scaler & Config laden
         with open("scaler_pt.pkl", "rb") as f:
             scaler = pickle.load(f)
         with open("model_config.pkl", "rb") as f:
             config = pickle.load(f)
             
-        # LSTM Autoencoder laden
         autoencoder = tf.keras.models.load_model("fraud_lstm_autoencoder.keras")
         
-        # Encoder extrahieren (Bottleneck Layer = Mitte des Autoencoders)
-        # Wir nehmen an, der Bottleneck ist in der Mitte (z.B. Index 2 oder 3). 
-        # Falls es einen benannten Layer "bottleneck" gibt, würde man get_layer("bottleneck") nutzen.
         try:
             encoder_model = Model(inputs=autoencoder.input, outputs=autoencoder.get_layer("bottleneck").output)
         except:
-            # Fallback: Nimm einfach die mittlere Schicht
             mid_layer_idx = len(autoencoder.layers) // 2
             encoder_model = Model(inputs=autoencoder.input, outputs=autoencoder.layers[mid_layer_idx].output)
             
-        # XGBoost Modell laden
         try:
             with open("xgboost_fraud_model.pkl", "rb") as f:
                 xgb_model = pickle.load(f)
         except:
-            # Fallback falls es anders heißt
             xgb_model = xgb.XGBClassifier()
             xgb_model.load_model("xgboost_fraud_model.json")
             
@@ -144,17 +137,28 @@ if uploaded_file is not None:
     st.success("✅ CSV-Datei erfolgreich geladen!")
 else:
     st.info("ℹ️ Keine CSV hochgeladen. Es werden Demo-Historien-Daten genutzt.")
-    # Erzeuge realistische Demo-Kundenhistorie
+    # Erzeuge realistische Demo-Kundenhistorie über die letzten 2 Tage
     df_history = pd.DataFrame({
         "Amount": [25.00, 12.50, 45.00, 120.00, 15.00, 8.90, 50.00, 30.00, 18.00, 95.00, 12.00, 31.37, 22.00, 40.00, 15.00, 60.00, 5.00, 11.00, 80.00, 10.00],
-        "Time": np.linspace(0, 86400, 20)
+        "Time": np.linspace(0, 172800, 20)  # 172800 Sekunden = 2 Tage
     })
 
-# TIME IN LESBARES FORMAT (HH:MM:SS) UMWANDELN & BEREINIGEN
+# TIME IN DATUM, WOCHENTAG & UHRZEIT UMWANDELN
 if "Time" in df_history.columns:
-    df_history["Uhrzeit"] = pd.to_timedelta(df_history["Time"], unit="s").astype(str).str.split(" ").str[-1].str.split(".").str[0]
+    # Wir tun so, als ob die Aufzeichnung in der CSV vor 2 Tagen begann
+    base_date = pd.Timestamp.now().normalize() - pd.Timedelta(days=2)
+    timestamps = base_date + pd.to_timedelta(df_history["Time"], unit="s")
+    
+    # Deutsches Wochentags-Mapping
+    wochentage = {0: 'Mo', 1: 'Di', 2: 'Mi', 3: 'Do', 4: 'Fr', 5: 'Sa', 6: 'So'}
+    
+    df_history["Wochentag"] = timestamps.dt.dayofweek.map(wochentage)
+    df_history["Datum"] = timestamps.dt.strftime("%d.%m.%Y") + " (" + df_history["Wochentag"] + ")"
+    df_history["Uhrzeit"] = timestamps.dt.strftime("%H:%M:%S")
+    
     df_history = df_history.sort_values(by="Time").reset_index(drop=True)
-    display_cols = ["Uhrzeit", "Amount"]
+    display_cols = ["Datum", "Uhrzeit", "Amount"]
+    
     if "Amount" in df_history.columns:
         df_display = df_history[display_cols].rename(columns={"Amount": "Betrag (€)"})
     else:
@@ -202,6 +206,11 @@ st.divider()
 # 3. NEUE TRANSAKTION ZUR BEURTEILUNG EINGEBEN
 # ==============================================================================
 st.header("3. Neue Transaktion zur Beurteilung eingeben")
+
+# Zeige aktuelles Datum an
+heute = pd.Timestamp.now()
+wochentage = {0: 'Mo', 1: 'Di', 2: 'Mi', 3: 'Do', 4: 'Fr', 5: 'Sa', 6: 'So'}
+st.write(f"📅 **Heutiges Datum:** {heute.strftime('%d.%m.%Y')} ({wochentage[heute.dayofweek]}) | ⏰ **Uhrzeit:** {heute.strftime('%H:%M')}")
 
 input_col1, input_col2, input_col3 = st.columns(3)
 
