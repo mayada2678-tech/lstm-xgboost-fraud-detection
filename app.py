@@ -88,18 +88,31 @@ def load_models():
     encoder_model = None
     xgb_model = None
     
-    try:
-        with open("scaler_pt.pkl", "rb") as f:
-            scaler = pickle.load(f)
-        with open("model_config.pkl", "rb") as f:
-            config = pickle.load(f)
-            
-        autoencoder = tf.keras.models.load_model("fraud_lstm_autoencoder.keras")
+    xgb_model = None
+
+try:
+    # 1. Lade den Scaler
+    with open("scaler_pt.pkl", "rb") as f:
+        scaler = pickle.load(f)
         
-        try:
-            encoder_model = Model(inputs=autoencoder.input, outputs=autoencoder.get_layer("bottleneck").output)
-        except:
-            mid_layer_idx = len(autoencoder.layers) // 2
+    # (Die Zeilen mit model_config.pkl haben wir entfernt)
+
+    # 2. Lade das LSTM-Modell mit dem RICHTIGEN Namen (.h5 statt .keras)
+    autoencoder = tf.keras.models.load_model("fraud_lstm_autoencoder_pt.h5")
+    
+    try:
+        encoder_model = Model(inputs=autoencoder.input, outputs=autoencoder.get_layer("bottleneck").output)
+    except:
+        mid_layer_idx = len(autoencoder.layers) // 2
+        encoder_model = Model(inputs=autoencoder.input, outputs=autoencoder.layers[mid_layer_idx].output)
+        
+    # 3. VERGISS NICHT XGBOOST ZU LADEN! (Falls das nicht weiter unten im Code steht)
+    # import xgboost as xgb
+    # xgb_model = xgb.XGBClassifier()
+    # xgb_model.load_model("xgb_fraud_model.json")
+
+except Exception as e:
+    print(f"Fehler beim Laden: {e}")
             encoder_model = Model(inputs=autoencoder.input, outputs=autoencoder.layers[mid_layer_idx].output)
             
         try:
