@@ -9,6 +9,15 @@ from xgboost import XGBClassifier
 import keras
 
 # ==============================================================================
+# SEITEN-KONFIGURATION (Wie früher: Breit und übersichtlich)
+# ==============================================================================
+st.set_page_config(
+    page_title="Betrugsdetektor: CSV-Prüfung",
+    page_icon="💳",
+    layout="wide"
+)
+
+# ==============================================================================
 # WORKAROUND: MONKEY-PATCH FÜR KERAS INKOMPATIBILITÄTEN (CLOUD FIX)
 # ==============================================================================
 original_glorot_init = keras.initializers.GlorotUniform.__init__
@@ -25,7 +34,7 @@ keras.layers.Dense.__init__ = patched_dense_init
 tf.keras.layers.Dense.__init__ = patched_dense_init
 
 # ==============================================================================
-# MODELLE LADEN (ANGEPASST AN DEINE GITHUB-DATEINAMEN)
+# MODELLE LADEN 
 # ==============================================================================
 @st.cache_resource
 def load_models():
@@ -34,11 +43,10 @@ def load_models():
         with open('scaler_pt.pkl', 'rb') as f:
             scaler = pickle.load(f)
             
-        # 2. Autoencoder laden
+        # 2. Autoencoder laden (HIER IST DER FIX: compile=False)
         autoencoder = load_model('fraud_lstm_autoencoder_pt.h5', compile=False)
         
         # 3. Encoder dynamisch aus Autoencoder extrahieren!
-        # Wir suchen den Layer direkt vor dem "RepeatVector" (das ist der Bottleneck)
         encoder_output = None
         for layer in autoencoder.layers:
             if isinstance(layer, tf.keras.layers.RepeatVector):
@@ -48,7 +56,7 @@ def load_models():
         if encoder_output is not None:
             encoder_model = Model(inputs=autoencoder.input, outputs=encoder_output)
         else:
-            # Fallback, falls die Architektur anders ist (z.B. die exakte Mitte nehmen)
+            # Fallback
             bottleneck_index = len(autoencoder.layers) // 2 - 1
             encoder_model = Model(inputs=autoencoder.input, outputs=autoencoder.layers[bottleneck_index].output)
         
@@ -65,74 +73,72 @@ def load_models():
 scaler, autoencoder, encoder_model, xgb_model = load_models()
 
 # ==============================================================================
-# STREAMLIT UI & VORHERSAGE
+# STREAMLIT UI & VORHERSAGE (DASHBOARD-ANSICHT)
 # ==============================================================================
-st.title("🛡️ Kreditkarten-Betrugserkennung")
-st.write("KI-System basierend auf LSTM-Autoencoder und XGBoost.")
-
-# CSS für schöne Status-Anzeigen
-st.markdown("""
-<style>
-.status-ok { background-color: #d4edda; color: #155724; padding: 10px; border-radius: 5px; font-weight: bold; text-align: center; }
-.status-fraud { background-color: #f8d7da; color: #721c24; padding: 10px; border-radius: 5px; font-weight: bold; text-align: center; }
-</style>
-""", unsafe_allow_html=True)
+st.title("💳 Kreditkarten-Betrugserkennung: CSV-Prüfung")
+st.write("Lade eine CSV-Datei mit Transaktionsdaten (Testdaten) hoch, um sie in Echtzeit auf Betrug zu analysieren.")
+st.write("---")
 
 if scaler and autoencoder and xgb_model:
     expected_features = scaler.n_features_in_
     
-    st.write(f"Bitte gib die {expected_features} Features für die Transaktion ein:")
+    # Datei-Upload statt Texteingabe
+    uploaded_file = st.file_uploader(f"Transaktionsdaten hochladen (CSV mit {expected_features} Spalten)", type=["csv"])
     
-    user_input = st.text_input("Features (durch Komma getrennt)", 
-                               value=",".join(["0.0"] * expected_features))
-    
-    if st.button("Transaktion prüfen"):
-        try:
-            # Eingabe verarbeiten
-            input_values = [float(x.strip()) for x in user_input.split(',')]
-            
-            if len(input_values) != expected_features:
-                st.warning(f"Bitte genau {expected_features} Werte eingeben!")
-            else:
-                # 1. Skalieren
-                X_input = np.array(input_values).reshape(1, -1)
-                X_scaled = scaler.transform(X_input)
-                
-                # 2. Umformen für LSTM (Samples, Timesteps, Features)
-                X_3d = X_scaled.reshape(1, 1, expected_features)
-                
-                # 3. Features & MSE berechnen
-                bottleneck_feats = encoder_model.predict(X_3d, verbose=0)
-                reconstruction = autoencoder.predict(X_3d, verbose=0)
-                mse = np.mean(np.power(X_3d - reconstruction, 2), axis=(1, 2)).reshape(-1, 1)
-                
-                # Bottleneck für XGBoost wieder flach machen (falls 3D)
-                if len(bottleneck_feats.shape) == 3:
-                    bottleneck_feats = bottleneck_feats.reshape(1, -1)
-                
-                # 4. Hybrid Feature Vektor bauen
-                X_hybrid = np.hstack((X_scaled, bottleneck_feats, mse))
-                
-                # 5. XGBoost Vorhersage
-                fraud_prob = xgb_model.predict_proba(X_hybrid)[0, 1] * 100
-                XGB_THRESHOLD = 80.0 
-                
-                # 6. Anzeige
-                col1, col2 = st.columns([1, 2])
-                with col1:
-                    st.metric(label="Betrugsrisiko", value=f"{fraud_prob:.2f} %")
-                    if fraud_prob >= XGB_THRESHOLD:
-                        st.markdown("<div class='status-fraud'>🚨 BETRUG!</div>", unsafe_allow_html=True)
+    if uploaded_file is not None:
+        # Daten einlesen
+        df = pd.read_csv(uploaded_file)
+        
+        st.write("### Vorschau der hochgeladenen Daten:")
+        st.dataframe(df.head())
+        
+        if st.button("🚨 Alle Transaktionen prüfen"):
+            with st.spinner('Analysiere Transaktionen durch KI...'):
+                try:
+                    # Prüfen, ob die Anzahl der Features stimmt
+                    if df.shape[1] != expected_features:
+                        st.error(f"Fehler: Das Modell erwartet genau {expected_features} Features, aber die CSV hat {df.shape[1]}.")
                     else:
-                        st.markdown("<div class='status-ok'>✅ GENEHMIGT</div>", unsafe_allow_html=True)
+                        # 1. Skalieren
+                        X_scaled = scaler.transform(df.values)
                         
-                with col2:
-                    st.write("**Details:**")
-                    st.code(f"""
-MSE (Fehler): {mse[0][0]:.6f}
-Latente Features: {bottleneck_feats.shape[1]}
-XGBoost Inputs: {X_hybrid.shape[1]}
-                    """, language="text")
-                    
-        except Exception as e:
-            st.error(f"Fehler bei der Vorhersage: {e}")
+                        # 2. Reshape für LSTM (Samples, 1, Features)
+                        X_3d = X_scaled.reshape(X_scaled.shape[0], 1, expected_features)
+                        
+                        # 3. Encoder Bottleneck Features & MSE extrahieren
+                        bottleneck_feats = encoder_model.predict(X_3d, verbose=0)
+                        if len(bottleneck_feats.shape) == 3:
+                            bottleneck_feats = bottleneck_feats.reshape(bottleneck_feats.shape[0], -1)
+                            
+                        reconstruction = autoencoder.predict(X_3d, verbose=0)
+                        mse = np.mean(np.power(X_3d - reconstruction, 2), axis=(1, 2)).reshape(-1, 1)
+                        
+                        # 4. Hybrid Feature Vektor bauen
+                        X_hybrid = np.hstack((X_scaled, bottleneck_feats, mse))
+                        
+                        # 5. XGBoost Vorhersage
+                        fraud_probs = xgb_model.predict_proba(X_hybrid)[:, 1] * 100
+                        XGB_THRESHOLD = 80.0 
+                        
+                        # 6. Ergebnisse in DataFrame einfügen
+                        df_results = df.copy()
+                        # Wir fügen die Ergebnisse als erste Spalten ein, damit man sie sofort sieht
+                        df_results.insert(0, 'Status', np.where(fraud_probs >= XGB_THRESHOLD, '🚨 BETRUG', '✅ OK'))
+                        df_results.insert(1, 'Betrugsrisiko (%)', fraud_probs.round(2))
+                        df_results.insert(2, 'MSE (Abweichung)', mse.round(4))
+                        
+                        st.success("Analyse erfolgreich abgeschlossen!")
+                        
+                        # Zeige Ergebnisse in einer schönen Tabelle
+                        st.write("### 📊 Analyse-Ergebnisse")
+                        
+                        # Tabelle stylen: Betrugszeilen rot markieren
+                        def style_fraud(row):
+                            if row['Status'] == '🚨 BETRUG':
+                                return ['background-color: #ffcccc'] * len(row)
+                            return [''] * len(row)
+                            
+                        st.dataframe(df_results.style.apply(style_fraud, axis=1), height=500)
+                        
+                except Exception as e:
+                    st.error(f"Fehler bei der Batch-Vorhersage: {e}")
