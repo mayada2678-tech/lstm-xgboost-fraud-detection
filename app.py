@@ -5,7 +5,6 @@ Created on Thu Jul 30 10:07:37 2026
 @author: mayad
 """
 
-# -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -36,20 +35,19 @@ st.markdown("""
 # ==============================================================================
 @st.cache_resource
 def load_models():
+    import keras
+    
     # 1. Scaler (PowerTransformer)
     with open("scaler_pt.pkl", "rb") as f:
         scaler = pickle.load(f)
         
-    # 2. LSTM Autoencoder
-   import keras
+    # 2. LSTM Autoencoder (Workaround für den Keras-Versionskonflikt)
+    class SafeGlorotUniform(keras.initializers.GlorotUniform):
+        def __init__(self, seed=None, **kwargs):
+            super().__init__(seed=seed)
 
-# Workaround für den Keras-Versionskonflikt (input_axes Fehler)
-class SafeGlorotUniform(keras.initializers.GlorotUniform):
-    def __init__(self, seed=None, **kwargs):
-        super().__init__(seed=seed)
-
-with keras.saving.custom_object_scope({'GlorotUniform': SafeGlorotUniform}):
-    autoencoder = tf.keras.models.load_model("fraud_lstm_autoencoder_pt.h5", compile=False)
+    with keras.saving.custom_object_scope({'GlorotUniform': SafeGlorotUniform}):
+        autoencoder = tf.keras.models.load_model("fraud_lstm_autoencoder_pt.h5", compile=False)
     
     # 3. Encoder Bottleneck extrahieren (die 32 Latent Features)
     encoder_model = Model(
@@ -137,6 +135,6 @@ if submit_btn:
 1. Original Features: {expected_features} (Log Amount, Delta Time, etc.)
 2. Scaler: Yeo-Johnson PowerTransformer
 3. LSTM Autoencoder MSE: {mse[0][0]:.6f}
-4. Extrahiert: 32 Latent Bottleneck Features
+4. Extrahiert: {bottleneck_feats.shape[1]} Latent Bottleneck Features
 5. XGBoost Input Features: {X_hybrid.shape[1]} (Kombiniert)
         """, language="text")
