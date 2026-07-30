@@ -12,6 +12,22 @@ import pickle
 import tensorflow as tf
 from tensorflow.keras.models import Model
 from xgboost import XGBClassifier
+import keras
+
+# ==============================================================================
+# WORKAROUND: MONKEY-PATCH FÜR GLOROT UNIFORM
+# Zwingt Keras dazu, unbekannte Argumente wie 'input_axes' zu ignorieren.
+# ==============================================================================
+original_glorot_init = keras.initializers.GlorotUniform.__init__
+
+def patched_glorot_init(self, seed=None, **kwargs):
+    # Wir leiten nur 'seed' weiter und verwerfen alles in **kwargs (z.B. input_axes)
+    original_glorot_init(self, seed=seed)
+
+keras.initializers.GlorotUniform.__init__ = patched_glorot_init
+tf.keras.initializers.GlorotUniform.__init__ = patched_glorot_init
+# ==============================================================================
+
 
 # ==============================================================================
 # 1. SEITEN-KONFIGURATION & STYLING
@@ -35,19 +51,12 @@ st.markdown("""
 # ==============================================================================
 @st.cache_resource
 def load_models():
-    # Workaround für den Streamlit Keras-Versionskonflikt ('input_axes' Fehler)
-    class SafeGlorotUniform(tf.keras.initializers.GlorotUniform):
-        def __init__(self, seed=None, **kwargs):
-            # Wir fangen 'input_axes' und 'output_axes' ab und leiten nur den seed weiter
-            super(SafeGlorotUniform, self).__init__(seed=seed)
-
     # 1. Scaler (PowerTransformer)
     with open("scaler_pt.pkl", "rb") as f:
         scaler = pickle.load(f)
         
-    # 2. LSTM Autoencoder MIT WORKAROUND laden
-    with tf.keras.utils.custom_object_scope({'GlorotUniform': SafeGlorotUniform}):
-        autoencoder = tf.keras.models.load_model("fraud_lstm_autoencoder_pt.h5", compile=False)
+    # 2. LSTM Autoencoder laden (Patch greift jetzt automatisch)
+    autoencoder = tf.keras.models.load_model("fraud_lstm_autoencoder_pt.h5", compile=False)
     
     # 3. Encoder Bottleneck extrahieren (die 32 Latent Features)
     encoder_model = Model(
@@ -89,36 +98,26 @@ with st.sidebar:
 if submit_btn:
     st.subheader("Analyse-Ergebnis")
     
-    # 1. Dummy Array mit der korrekten Feature-Anzahl erstellen
     expected_features = scaler.n_features_in_
     X_input = np.zeros((1, expected_features))
     
-    # Feature Engineering (wie in deinem Trainingsskript)
-    X_input[0, 0] = np.log1p(amount) # Amount_log
-    X_input[0, 1] = delta_time       # delta_time
-    X_input[0, 2] = tx_count_1h      # tx_count_1h
+    X_input[0, 0] = np.log1p(amount)
+    X_input[0, 1] = delta_time
+    X_input[0, 2] = tx_count_1h
     
-    # 2. Skalierung (Yeo-Johnson)
     X_scaled = scaler.transform(X_input)
-    
-    # 3. Reshape für LSTM (3D: Samples, Timesteps, Features)
     X_3d = X_scaled.reshape(1, 1, expected_features)
     
-    # 4. LSTM Bottleneck Features & MSE berechnen
     bottleneck_feats = encoder_model.predict(X_3d, verbose=0)
     reconstruction = autoencoder.predict(X_3d, verbose=0)
     mse = np.mean(np.power(X_3d - reconstruction, 2), axis=(1, 2)).reshape(-1, 1)
     
-    # 5. Hybrid Feature Vektor bauen (Skaliert + Bottleneck + MSE)
     X_hybrid = np.hstack((X_scaled, bottleneck_feats, mse))
     
-    # 6. XGBoost Prediction
     fraud_prob = xgb_model.predict_proba(X_hybrid)[0, 1] * 100
     
-    # Schwellenwert
     XGB_THRESHOLD = 80.0 
     
-    # 7. Ergebnisse anzeigen
     col1, col2 = st.columns([1, 2])
     
     with col1:
