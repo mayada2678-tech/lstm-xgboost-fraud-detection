@@ -35,7 +35,7 @@ def load_models():
             scaler = pickle.load(f)
             
         # 2. Autoencoder laden
-        autoencoder = load_model('fraud_lstm_autoencoder_pt.h5')
+        autoencoder = load_model('fraud_lstm_autoencoder_pt.h5', compile=False)
         
         # 3. Encoder dynamisch aus Autoencoder extrahieren!
         # Wir suchen den Layer direkt vor dem "RepeatVector" (das ist der Bottleneck)
