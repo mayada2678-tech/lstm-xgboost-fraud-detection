@@ -41,7 +41,15 @@ def load_models():
         scaler = pickle.load(f)
         
     # 2. LSTM Autoencoder
-    autoencoder = tf.keras.models.load_model("fraud_lstm_autoencoder_pt.h5")
+   import keras
+
+# Workaround für den Keras-Versionskonflikt (input_axes Fehler)
+class SafeGlorotUniform(keras.initializers.GlorotUniform):
+    def __init__(self, seed=None, **kwargs):
+        super().__init__(seed=seed)
+
+with keras.saving.custom_object_scope({'GlorotUniform': SafeGlorotUniform}):
+    autoencoder = tf.keras.models.load_model("fraud_lstm_autoencoder_pt.h5", compile=False)
     
     # 3. Encoder Bottleneck extrahieren (die 32 Latent Features)
     encoder_model = Model(
