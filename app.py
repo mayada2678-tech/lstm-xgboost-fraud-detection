@@ -35,19 +35,12 @@ st.markdown("""
 # ==============================================================================
 @st.cache_resource
 def load_models():
-    import keras
-    
     # 1. Scaler (PowerTransformer)
     with open("scaler_pt.pkl", "rb") as f:
         scaler = pickle.load(f)
         
-    # 2. LSTM Autoencoder (Workaround für den Keras-Versionskonflikt)
-    class SafeGlorotUniform(keras.initializers.GlorotUniform):
-        def __init__(self, seed=None, **kwargs):
-            super().__init__(seed=seed)
-
-    with keras.saving.custom_object_scope({'GlorotUniform': SafeGlorotUniform}):
-        autoencoder = tf.keras.models.load_model("fraud_lstm_autoencoder_pt.h5", compile=False)
+    # 2. LSTM Autoencoder (Ganz normal laden, erfordert TF >= 2.16.1 in requirements.txt!)
+    autoencoder = tf.keras.models.load_model("fraud_lstm_autoencoder_pt.h5", compile=False)
     
     # 3. Encoder Bottleneck extrahieren (die 32 Latent Features)
     encoder_model = Model(
