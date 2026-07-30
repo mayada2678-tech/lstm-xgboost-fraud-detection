@@ -80,6 +80,9 @@ except Exception:
 # ==============================================================================
 # MODELL & ARTEFAKTE LADEN
 # ==============================================================================
+# ==============================================================================
+# MODELL & ARTEFAKTE LADEN
+# ==============================================================================
 @st.cache_resource
 def load_models():
     scaler = None
@@ -93,8 +96,8 @@ def load_models():
         with open("scaler_pt.pkl", "rb") as f:
             scaler = pickle.load(f)
 
-        # 2. Lade das LSTM-Modell
-        autoencoder = tf.keras.models.load_model("fraud_lstm_autoencoder_pt.h5")
+        # 2. Lade das LSTM-Modell OHNE Kompilierung (Behebt den 'keras.metrics.mse' Fehler!)
+        autoencoder = tf.keras.models.load_model("fraud_lstm_autoencoder_pt.h5", compile=False)
         
         # Extrahiere den Encoder aus dem Autoencoder
         try:
@@ -119,7 +122,6 @@ def load_models():
     return autoencoder, encoder_model, xgb_model, scaler, config
 
 autoencoder, encoder_model, xgb_model, scaler, config = load_models()
-
 # ==============================================================================
 # HEADER
 # ==============================================================================
