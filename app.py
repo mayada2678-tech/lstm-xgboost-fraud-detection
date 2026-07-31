@@ -68,28 +68,30 @@ st.markdown("""
 # ==============================================================================
 # WORKAROUND: MONKEY-PATCH FÜR KERAS INKOMPATIBILITÄTEN (CLOUD FIX)
 # ==============================================================================
+# ==============================================================================
+# WORKAROUND: Keras Custom Object für Versionskonflikte
+# ==============================================================================
+from tensorflow.keras.layers import Dense as OriginalDense
+
+# Wir erstellen einen sicheren Dense-Layer, der den Fehlerhaften Parameter löscht
+class SafeDense(OriginalDense):
+    def __init__(self, *args, **kwargs):
+        kwargs.pop('quantization_config', None)
+        super().__init__(*args, **kwargs)
+
+    @classmethod
+    def from_config(cls, config):
+        config.pop('quantization_config', None)
+        return OriginalDense.from_config(config)
+
+# Fix für GlorotUniform (falls nötig)
 try:
-    # 1. Fix für GlorotUniform
     original_glorot_init = keras.initializers.GlorotUniform.__init__
     def patched_glorot_init(self, seed=None, **kwargs):
         original_glorot_init(self, seed=seed)
     keras.initializers.GlorotUniform.__init__ = patched_glorot_init
     tf.keras.initializers.GlorotUniform.__init__ = patched_glorot_init
-
-    # 2. NEUER FIX: Ignoriere 'quantization_config' in Dense Layern
-    from tensorflow.keras.layers import Dense
-    original_dense_from_config = Dense.from_config
-    
-    @classmethod
-    def patched_dense_from_config(cls, config):
-        if 'quantization_config' in config:
-            del config['quantization_config'] # Löscht den fehlerhaften Parameter einfach
-        return original_dense_from_config(config)
-        
-    Dense.from_config = patched_dense_from_config
-
-except Exception as e:
-    st.write(f"Patch-Fehler: {e}")
+except Exception:
     pass
 
 # ==============================================================================
