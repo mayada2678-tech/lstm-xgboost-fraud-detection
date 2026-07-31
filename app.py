@@ -18,6 +18,7 @@ import h5py
 import json
 import shutil
 import os
+
 # ==============================================================================
 # SEITEN-KONFIGURATION & CSS
 # ==============================================================================
@@ -69,35 +70,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# WORKAROUND: MONKEY-PATCH FÜR KERAS INKOMPATIBILITÄTEN (CLOUD FIX)
-# ==============================================================================
-# ==============================================================================
-# WORKAROUND: Keras Custom Object für Versionskonflikte
-# ==============================================================================
-from tensorflow.keras.layers import Dense as OriginalDense
-
-# Wir erstellen einen sicheren Dense-Layer, der den Fehlerhaften Parameter löscht
-class SafeDense(OriginalDense):
-    def __init__(self, *args, **kwargs):
-        kwargs.pop('quantization_config', None)
-        super().__init__(*args, **kwargs)
-
-    @classmethod
-    def from_config(cls, config):
-        config.pop('quantization_config', None)
-        return OriginalDense.from_config(config)
-
-# Fix für GlorotUniform (falls nötig)
-try:
-    original_glorot_init = keras.initializers.GlorotUniform.__init__
-    def patched_glorot_init(self, seed=None, **kwargs):
-        original_glorot_init(self, seed=seed)
-    keras.initializers.GlorotUniform.__init__ = patched_glorot_init
-    tf.keras.initializers.GlorotUniform.__init__ = patched_glorot_init
-except Exception:
-    pass
-
-# ==============================================================================
 # MODELL & ARTEFAKTE LADEN
 # ==============================================================================
 @st.cache_resource
@@ -113,8 +85,45 @@ def load_models():
         with open("scaler_pt.pkl", "rb") as f:
             scaler = pickle.load(f)
 
-        # 2. Lade das LSTM-Modell OHNE Kompilierung (Behebt den 'keras.metrics.mse' Fehler!)
-        autoencoder = tf.keras.models.load_model("fraud_lstm_autoencoder_pt.h5", compile=False)
+        # =========================================================
+        # ULTIMATIVER H5-FIX: Manipuliere die Datei direkt
+        # =========================================================
+        original_h5 = "fraud_lstm_autoencoder_pt.h5"
+        
+        # Falls der Pfad schreibgeschützt ist (wie in der Cloud), nutzen wir /tmp/
+        # Lokal reicht auch einfach eine Datei im selben Ordner.
+        fixed_h5 = "/tmp/fixed_model.h5" if os.path.exists("/tmp") else "fixed_model_temp.h5"
+        
+        # Erstelle eine Arbeitskopie der Datei
+        shutil.copy2(original_h5, fixed_h5)
+        
+        # H5 Datei öffnen und die fehlerhaften Parameter aus dem internen JSON operativ entfernen
+        with h5py.File(fixed_h5, 'r+') as f:
+            if 'model_config' in f.attrs:
+                model_config_str = f.attrs['model_config']
+                if isinstance(model_config_str, bytes):
+                    model_config_str = model_config_str.decode('utf-8')
+                
+                model_config = json.loads(model_config_str)
+                
+                # Rekursive Suchfunktion, die ALLES mit 'quantization_config' gnadenlos löscht
+                def remove_quant(obj):
+                    if isinstance(obj, dict):
+                        obj.pop('quantization_config', None)
+                        for k, v in obj.items():
+                            remove_quant(v)
+                    elif isinstance(obj, list):
+                        for item in obj:
+                            remove_quant(item)
+                
+                remove_quant(model_config)
+                
+                # Sauberes JSON wieder in die Datei schreiben
+                f.attrs['model_config'] = json.dumps(model_config).encode('utf-8')
+        
+        # 2. Lade das REPARIERTE LSTM-Modell
+        autoencoder = tf.keras.models.load_model(fixed_h5, compile=False)
+        # =========================================================
         
         # Extrahiere den Encoder aus dem Autoencoder
         try:
@@ -139,6 +148,7 @@ def load_models():
     return autoencoder, encoder_model, xgb_model, scaler, config
 
 autoencoder, encoder_model, xgb_model, scaler, config = load_models()
+
 # ==============================================================================
 # HEADER
 # ==============================================================================
@@ -200,8 +210,13 @@ st.divider()
 st.header("2. Berechnetes Kundenprofil (aus CSV ermittelt)")
 
 # Kennzahlen berechnen
-avg_amount = df_history["Amount"].mean()
-max_amount = df_history["Amount"].max()
+if "Amount" in df_history.columns:
+    avg_amount = df_history["Amount"].mean()
+    max_amount = df_history["Amount"].max()
+else:
+    avg_amount = 0.0
+    max_amount = 0.0
+    
 total_tx = len(df_history)
 estimated_limit = max_amount * 10 if max_amount > 0 else 2000.00
 
