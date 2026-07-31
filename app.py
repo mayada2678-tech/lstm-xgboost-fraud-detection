@@ -69,17 +69,29 @@ st.markdown("""
 # WORKAROUND: MONKEY-PATCH FÜR KERAS INKOMPATIBILITÄTEN (CLOUD FIX)
 # ==============================================================================
 try:
+    # 1. Fix für GlorotUniform
     original_glorot_init = keras.initializers.GlorotUniform.__init__
     def patched_glorot_init(self, seed=None, **kwargs):
         original_glorot_init(self, seed=seed)
     keras.initializers.GlorotUniform.__init__ = patched_glorot_init
     tf.keras.initializers.GlorotUniform.__init__ = patched_glorot_init
-except Exception:
+
+    # 2. NEUER FIX: Ignoriere 'quantization_config' in Dense Layern
+    from tensorflow.keras.layers import Dense
+    original_dense_from_config = Dense.from_config
+    
+    @classmethod
+    def patched_dense_from_config(cls, config):
+        if 'quantization_config' in config:
+            del config['quantization_config'] # Löscht den fehlerhaften Parameter einfach
+        return original_dense_from_config(config)
+        
+    Dense.from_config = patched_dense_from_config
+
+except Exception as e:
+    st.write(f"Patch-Fehler: {e}")
     pass
 
-# ==============================================================================
-# MODELL & ARTEFAKTE LADEN
-# ==============================================================================
 # ==============================================================================
 # MODELL & ARTEFAKTE LADEN
 # ==============================================================================
