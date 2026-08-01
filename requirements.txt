@@ -1,6 +1,6 @@
-streamlit
+tensorflow==2.21.0
+scikit-learn==1.5.1
+xgboost
 pandas
 numpy
-xgboost
-scikit-learn
-tensorflow>=2.16.1
+streamlit
