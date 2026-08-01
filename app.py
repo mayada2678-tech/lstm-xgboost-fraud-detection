@@ -107,16 +107,21 @@ def load_models():
                 model_config = json.loads(model_config_str)
                 
                 # Rekursive Suchfunktion, die ALLES mit 'quantization_config' gnadenlos löscht
-                def remove_quant(obj):
+                               # Rekursive Suchfunktion, die ALLES Fehlerhafte gnadenlos löscht
+                def clean_config(obj):
                     if isinstance(obj, dict):
+                        # Hier löschen wir die problematischen Keras-3 Parameter raus!
                         obj.pop('quantization_config', None)
-                        for k, v in obj.items():
-                            remove_quant(v)
+                        obj.pop('input_axes', None)   # <-- Das war der Haupt-Fehler!
+                        obj.pop('output_axes', None)  # <-- Sicher ist sicher
+                        
+                        for k, v in list(obj.items()):
+                            clean_config(v)
                     elif isinstance(obj, list):
                         for item in obj:
-                            remove_quant(item)
+                            clean_config(item)
                 
-                remove_quant(model_config)
+                clean_config(model_config)
                 
                 # Sauberes JSON wieder in die Datei schreiben
                 f.attrs['model_config'] = json.dumps(model_config).encode('utf-8')
